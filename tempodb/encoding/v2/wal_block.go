@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/opentracing/opentracing-go"
 
 	"github.com/grafana/tempo/pkg/dataquality"
 	"github.com/grafana/tempo/pkg/model"
@@ -55,7 +54,7 @@ func createWALBlock(meta *backend.BlockMeta, filepath, dataEncoding string, inge
 	}
 
 	h := &walBlock{
-		meta:           backend.NewBlockMeta(meta.TenantID, meta.BlockID, meta.Version, meta.Encoding, dataEncoding),
+		meta:           backend.NewBlockMeta(meta.TenantID, (uuid.UUID)(meta.BlockID), meta.Version, meta.Encoding, dataEncoding),
 		filepath:       filepath,
 		ingestionSlack: ingestionSlack,
 		encoder:        enc,
@@ -133,7 +132,7 @@ func openWALBlock(filename, path string, ingestionSlack, additionalStartSlack ti
 	}
 
 	b.appender = NewRecordAppender(records)
-	b.meta.TotalObjects = b.appender.Length()
+	b.meta.TotalObjects = int64(b.appender.Length())
 	b.meta.StartTime = time.Unix(int64(blockStart), 0)
 	b.meta.EndTime = time.Unix(int64(blockEnd), 0)
 
@@ -244,8 +243,8 @@ func (a *walBlock) Clear() error {
 
 // Find implements common.Finder
 func (a *walBlock) FindTraceByID(ctx context.Context, id common.ID, _ common.SearchOptions) (*tempopb.Trace, error) {
-	span, _ := opentracing.StartSpanFromContext(ctx, "v2WalBlock.FindTraceByID")
-	defer span.Finish()
+	_, span := tracer.Start(ctx, "v2WalBlock.FindTraceByID")
+	defer span.End()
 
 	combiner := model.StaticCombiner
 

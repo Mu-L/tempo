@@ -16,7 +16,6 @@ import (
 	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/tempodb"
 	"github.com/grafana/tempo/tempodb/backend"
-	"github.com/opentracing/opentracing-go"
 	"github.com/segmentio/fasthash/fnv1a"
 )
 
@@ -67,7 +66,7 @@ func (r *tagsSearchRequest) buildTagSearchBlockRequest(subR *http.Request, block
 		TotalRecords:  m.TotalRecords,
 		DataEncoding:  m.DataEncoding,
 		Version:       m.Version,
-		Size_:         m.Size,
+		Size_:         m.Size_,
 		FooterSize:    m.FooterSize,
 	})
 }
@@ -122,7 +121,7 @@ func (r *tagValueSearchRequest) buildTagSearchBlockRequest(subR *http.Request, b
 		TotalRecords:  m.TotalRecords,
 		DataEncoding:  m.DataEncoding,
 		Version:       m.Version,
-		Size_:         m.Size,
+		Size_:         m.Size_,
 		FooterSize:    m.FooterSize,
 	})
 }
@@ -202,8 +201,8 @@ func (s searchTagSharder) RoundTrip(pipelineRequest pipeline.Request) (pipeline.
 	if err != nil {
 		return pipeline.NewBadRequest(err), nil
 	}
-	span, ctx := opentracing.StartSpanFromContext(requestCtx, "frontend.ShardSearchTags")
-	defer span.Finish()
+	ctx, span := tracer.Start(requestCtx, "frontend.ShardSearchTags")
+	defer span.End()
 
 	// calculate and enforce max search duration
 	maxDuration := s.maxDuration(tenantID)

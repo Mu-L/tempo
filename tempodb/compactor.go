@@ -9,9 +9,10 @@ import (
 	"time"
 
 	"github.com/go-kit/log/level"
-	"github.com/opentracing/opentracing-go"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.opentelemetry.io/otel"
 
 	"github.com/grafana/tempo/pkg/dataquality"
 	"github.com/grafana/tempo/pkg/util/tracing"
@@ -30,6 +31,8 @@ const (
 	DefaultFlushSizeBytes     uint32 = 20 * 1024 * 1024 // 20 MiB
 	DefaultIteratorBufferSize        = 1000
 )
+
+var tracer = otel.Tracer("tempodb/compactor")
 
 var (
 	metricCompactionBlocks = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -178,8 +181,8 @@ func (rw *readerWriter) compact(ctx context.Context, blockMetas []*backend.Block
 	level.Debug(rw.logger).Log("msg", "beginning compaction", "num blocks compacting", len(blockMetas))
 
 	// todo - add timeout?
-	span, ctx := opentracing.StartSpanFromContext(ctx, "rw.compact")
-	defer span.Finish()
+	ctx, span := tracer.Start(ctx, "rw.compact")
+	defer span.End()
 
 	traceID, _ := tracing.ExtractTraceID(ctx)
 	if traceID != "" {
@@ -196,10 +199,10 @@ func (rw *readerWriter) compact(ctx context.Context, blockMetas []*backend.Block
 	var totalRecords int
 	for _, blockMeta := range blockMetas {
 		level.Info(rw.logger).Log("msg", "compacting block", "block", fmt.Sprintf("%+v", blockMeta))
-		totalRecords += blockMeta.TotalObjects
+		totalRecords += int(blockMeta.TotalObjects)
 
 		// Make sure block still exists
-		_, err = rw.r.BlockMeta(ctx, blockMeta.BlockID, tenantID)
+		_, err = rw.r.BlockMeta(ctx, (uuid.UUID)(blockMeta.BlockID), tenantID)
 		if err != nil {
 			return err
 		}
@@ -281,7 +284,7 @@ func markCompacted(rw *readerWriter, tenantID string, oldBlocks, newBlocks []*ba
 	var errCount int
 	for _, meta := range oldBlocks {
 		// Mark in the backend
-		if err := rw.c.MarkBlockCompacted(meta.BlockID, tenantID); err != nil {
+		if err := rw.c.MarkBlockCompacted((uuid.UUID)(meta.BlockID), tenantID); err != nil {
 			errCount++
 			level.Error(rw.logger).Log("msg", "unable to mark block compacted", "blockID", meta.BlockID, "tenantID", tenantID, "err", err)
 			metricCompactionErrors.Inc()
@@ -328,8 +331,8 @@ func compactionLevelForBlocks(blockMetas []*backend.BlockMeta) uint8 {
 	level := uint8(0)
 
 	for _, m := range blockMetas {
-		if m.CompactionLevel > level {
-			level = m.CompactionLevel
+		if m.CompactionLevel > uint32(level) {
+			level = uint8(m.CompactionLevel)
 		}
 	}
 

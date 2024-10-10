@@ -6,18 +6,17 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/services"
-	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 	"gopkg.in/yaml.v2"
 
 	userconfigurableoverrides "github.com/grafana/tempo/modules/overrides/userconfigurable/client"
@@ -151,8 +150,8 @@ func (o *userConfigurableOverridesManager) stopping(error) error {
 }
 
 func (o *userConfigurableOverridesManager) reloadAllTenantLimits(ctx context.Context) error {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "userConfigurableOverridesManager.reloadAllTenantLimits")
-	defer span.Finish()
+	ctx, span := tracer.Start(ctx, "userConfigurableOverridesManager.reloadAllTenantLimits")
+	defer span.End()
 
 	traceID, _ := tracing.ExtractTraceID(ctx)
 	level.Info(o.logger).Log("msg", "reloading all tenant limits", "traceID", traceID)
@@ -213,7 +212,8 @@ func (o *userConfigurableOverridesManager) setTenantLimit(userID string, limits 
 }
 
 func (o *userConfigurableOverridesManager) GetTenantIDs() []string {
-	return maps.Keys(o.getAllTenantLimits())
+	limits := o.getAllTenantLimits()
+	return slices.AppendSeq(make([]string, 0, len(limits)), maps.Keys(limits))
 }
 
 func (o *userConfigurableOverridesManager) Forwarders(userID string) []string {

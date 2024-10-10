@@ -18,7 +18,6 @@ import (
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gogo/status"
-	"github.com/google/uuid"
 	"github.com/grafana/dskit/user"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
@@ -31,6 +30,7 @@ import (
 	"github.com/grafana/tempo/pkg/cache"
 	"github.com/grafana/tempo/pkg/search"
 	"github.com/grafana/tempo/pkg/tempopb"
+	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/pkg/util"
 	"github.com/grafana/tempo/pkg/util/test"
 	"github.com/grafana/tempo/tempodb"
@@ -402,15 +402,18 @@ func TestSearchLimitHonored(t *testing.T) {
 			}
 
 			// grpc
-			var actualResp *tempopb.SearchResponse
+			combiner := traceql.NewMetadataCombiner()
 			err = f.streamingSearch(tc.request, newMockStreamingServer(tenant, func(i int, sr *tempopb.SearchResponse) {
-				actualResp = sr
+				// combine
+				for _, t := range sr.Traces {
+					combiner.AddMetadata(t)
+				}
 			}))
 			if tc.badRequest {
 				require.Equal(t, status.Error(codes.InvalidArgument, "adjust limit: limit 20 exceeds max limit 15"), err)
 			} else {
 				require.NoError(t, err)
-				require.Len(t, actualResp.Traces, tc.expectedTraces)
+				require.Equal(t, combiner.Count(), tc.expectedTraces)
 			}
 		})
 	}
@@ -554,9 +557,9 @@ func TestSearchAccessesCache(t *testing.T) {
 	meta := &backend.BlockMeta{
 		StartTime:    time.Unix(15, 0),
 		EndTime:      time.Unix(16, 0),
-		Size:         defaultTargetBytesPerRequest,
+		Size_:        defaultTargetBytesPerRequest,
 		TotalRecords: 1,
-		BlockID:      uuid.MustParse("00000000-0000-0000-0000-000000000123"),
+		BlockID:      backend.MustParse("00000000-0000-0000-0000-000000000123"),
 	}
 
 	rdr := &mockReader{
@@ -672,9 +675,9 @@ func BenchmarkSearchPipeline(b *testing.B) {
 		rdr.metas = append(rdr.metas, &backend.BlockMeta{
 			StartTime:    time.Unix(15, 0),
 			EndTime:      time.Unix(16, 0),
-			Size:         defaultTargetBytesPerRequest,
+			Size_:        defaultTargetBytesPerRequest,
 			TotalRecords: 1,
-			BlockID:      uuid.MustParse(fmt.Sprintf("00000000-0000-0000-0000-%012d", i)),
+			BlockID:      backend.MustParse(fmt.Sprintf("00000000-0000-0000-0000-%012d", i)),
 		})
 	}
 
@@ -731,32 +734,32 @@ func frontendWithSettings(t require.TestingT, next http.RoundTripper, rdr tempod
 				{
 					StartTime:    time.Unix(1100, 0),
 					EndTime:      time.Unix(1200, 0),
-					Size:         defaultTargetBytesPerRequest * 2,
+					Size_:        defaultTargetBytesPerRequest * 2,
 					TotalRecords: 2,
-					BlockID:      uuid.MustParse("00000000-0000-0000-0000-000000000000"),
+					BlockID:      backend.MustParse("00000000-0000-0000-0000-000000000000"),
 				},
 				{
 					StartTime:    time.Unix(1100, 0),
 					EndTime:      time.Unix(1200, 0),
-					Size:         defaultTargetBytesPerRequest * 2,
+					Size_:        defaultTargetBytesPerRequest * 2,
 					TotalRecords: 2,
-					BlockID:      uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+					BlockID:      backend.MustParse("00000000-0000-0000-0000-000000000001"),
 				},
 				// These are RF1 metrics blocks
 				{
 					StartTime:         time.Unix(1100, 0),
 					EndTime:           time.Unix(1200, 0),
-					Size:              defaultTargetBytesPerRequest * 2,
+					Size_:             defaultTargetBytesPerRequest * 2,
 					TotalRecords:      2,
-					BlockID:           uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+					BlockID:           backend.MustParse("00000000-0000-0000-0000-000000000002"),
 					ReplicationFactor: 1,
 				},
 				{
 					StartTime:         time.Unix(1100, 0),
 					EndTime:           time.Unix(1200, 0),
-					Size:              defaultTargetBytesPerRequest * 2,
+					Size_:             defaultTargetBytesPerRequest * 2,
 					TotalRecords:      2,
-					BlockID:           uuid.MustParse("00000000-0000-0000-0000-000000000003"),
+					BlockID:           backend.MustParse("00000000-0000-0000-0000-000000000003"),
 					ReplicationFactor: 1,
 				},
 			},

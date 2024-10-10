@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -14,8 +15,9 @@ import (
 	"github.com/grafana/dskit/ring"
 	"github.com/grafana/dskit/services"
 	"github.com/grafana/dskit/user"
-	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/atomic"
 
 	"github.com/grafana/tempo/modules/generator/storage"
@@ -33,6 +35,8 @@ const (
 	// in order to simplify the config.
 	ringNumTokens = 256
 )
+
+var tracer = otel.Tracer("modules/generator")
 
 var (
 	ErrUnconfigured = errors.New("no metrics_generator.storage.path configured, metrics generator will be disabled")
@@ -159,15 +163,17 @@ func (g *Generator) running(ctx context.Context) error {
 }
 
 func (g *Generator) stopping(_ error) error {
-	// Mark as read-only
-	g.stopIncomingRequests()
-
 	if g.subservices != nil {
 		err := services.StopManagerAndAwaitStopped(context.Background(), g.subservices)
 		if err != nil {
 			level.Error(g.logger).Log("msg", "failed to stop metrics-generator dependencies", "err", err)
 		}
 	}
+
+	time.Sleep(5 * time.Second) // let the ring propagate the shutdown
+
+	// Mark as read-only after we have removed ourselves from the ring
+	g.stopIncomingRequests()
 
 	var wg sync.WaitGroup
 	wg.Add(len(g.instances))
@@ -194,14 +200,14 @@ func (g *Generator) PushSpans(ctx context.Context, req *tempopb.PushSpansRequest
 		return nil, ErrReadOnly
 	}
 
-	span, ctx := opentracing.StartSpanFromContext(ctx, "generator.PushSpans")
-	defer span.Finish()
+	ctx, span := tracer.Start(ctx, "generator.PushSpans")
+	defer span.End()
 
 	instanceID, err := user.ExtractOrgID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	span.SetTag("instanceID", instanceID)
+	span.SetAttributes(attribute.String("instanceID", instanceID))
 
 	instance, err := g.getOrCreateInstance(instanceID)
 	if err != nil {
